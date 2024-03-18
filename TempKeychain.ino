@@ -8,6 +8,9 @@
 // initialize the neopixel strip           vvv these values are related to the type of strip used
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 
+int vccValues[10] = {5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000};
+int tempValues[10] = {72, 72, 72, 72, 72, 72, 72, 72, 72, 72};
+
 /*
  * The following text and arrays are the colors for each temperature range.
  * Apart from the extremes, each color describes a 2.5ºF temperature range.
@@ -89,54 +92,147 @@ void setup() {
   strip.setBrightness(20); // remove later or change for final product
   // show strip to clear out all of the pixels
   strip.show();
+
+  // fill the temp and vcc arrays with data readings
+  for (int i = 0; i < 10; i++) {
+    updateVccValues();
+    updateTempValues();
+  }
 }
 
 // control when the switch animation mode
 unsigned long switchTime = 0;
-// interval between switches (in ms)
-const unsigned long switchInterval = 15000; // 15 seconds
+// how long the gauge gets displayed for
+const unsigned long switchInterval = 20000; // 20 seconds
 // animation mode variable
 bool animation = false;
 // modify delay in taking temperature values
 // longer delay values allow the animations to go on for longer
 // this is really only important in the animations that store values like the fades
 const float delayMultiplier = 1.0f;
+// the ratio of gauge display time to animation display time (approximatley)
+const float gaugeToAnimationRatio = 4.0f;
 
 void loop() {
-  // read the temperature
-  int temp = readTemp();
 
   // check if it is time to switch animation mode
-  if (millis() > switchTime) {
+  if (animation) {
+    // animation time is smaller than gauge time
+    if (millis() > switchTime / gaugeToAnimationRatio) {
+      switchAnimation();
+    }
+  } else {
+    if (millis() > switchTime) {
+      switchAnimation();
+    }
+  }
+  // update vcc and temp values
+  updateVccValues();
+  updateTempValues();
+  // display temperature
+  // hotter more accurate, colder, less accurate
+  // 15c 60º - 11º higher
+  // 22c 70º - 5º higher
+  // 27c 80º - 3-4º higher
+  // inverse curve
+  displayTemperature(getAverage(tempValues), animation);
+  //Serial.println(readVcc());
+  // no delay needed because delay is built into the displayTemperature() method
+}
+
+/**
+ * Get the average of the inputted array
+ */
+int getAverage(int values[10]) {
+  long total = 0;
+  for (int i = 0; i < 10; i++) {
+    total+= values[i];
+  }
+  return total / 10;
+}
+
+/**
+ * Reads voltage value to add to the vccValues array
+ */
+void updateVccValues() {
+  // shift values down by 
+  for (int i = 0; i < 9; i++) {
+    vccValues[i] = vccValues[i+1];
+  }
+  vccValues[9] = (int) readVcc(); // insert latest value in array
+}
+
+/**
+ * Read voltage value of the Arduino using the internal referance.
+ * This is used for reading the temperature value
+ */
+long readVcc() {
+ 
+long result;
+  // Read 1.1V reference against AVcc
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  delay(2); // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC); // Convert
+  while (bit_is_set(ADCSRA,ADSC));
+  result = ADCL;
+  result |= ADCH<<8;
+  result = 1126400L / result; // Back-calculate AVcc in mV
+  return result;
+}
+
+void switchAnimation() {
     // switch
     animation = !animation;
     // set next switch time
     switchTime = millis() + switchInterval;
+}
+
+/**
+ * reads a temperature value to add to the tempValues array
+ */
+void updateTempValues() {
+  // shift values down by 
+  for (int i = 0; i < 9; i++) {
+    tempValues[i] = tempValues[i+1];
   }
+  tempValues[9] = readTemp(); // insert latest value at the end
+}
 
-  // display temperature
-  displayTemperature(temp, animation);
-
-  // no delay needed because delay is built into the displayTemperature() method
+/*
+ * Curve to modify temperature values.
+ */
+float curve(float value) {
+  return value - ((double) 1/value) * 100;
 }
 
 /**
    Reads the temperature from the TMP36 sensor and returns the value in ºF
 */
 int readTemp() {
+  float vcc = (float) getAverage(vccValues) / 1000;
+  Serial.println(vcc);
   // put your main code here, to run repeatedly:
   //getting the voltage reading from the temperature sensor
   int reading = analogRead(SENSOR_PIN);
   // converting that reading to voltage, for 3.3v arduino use 3.3
-  float voltage = reading * 5.0;
+  
+  if (vcc > 5.0) {
+    vcc = 5.0f;
+  }
+  float voltage = reading * vcc;
   voltage /= 1024.0;
 
   // now print out the temperature
   float temperatureC = (voltage - 0.5) * 100 ;  //converting from 10 mv per degree wit 500 mV offset
   //to degrees ((voltage - 500mV) times 100)
 
-  Serial.print(temperatureC); Serial.println(" degrees C");
+  //Serial.print(temperatureC); Serial.println(" degrees C");
 
+  // curve the temperature if undervolting
+  if (vcc < 5) {
+    temperatureC = curve(temperatureC);
+  }
+ 
   // now convert to Fahrenheit
   float temperatureF = (temperatureC * 9.0 / 5.0) + 32.0;
   Serial.print(temperatureF); Serial.println(" degrees F");
