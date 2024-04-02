@@ -5,6 +5,14 @@
 #define NUM_LEDS 8 // number of leds on the strip
 #define SENSOR_PIN A3 // sensor pin
 
+// battery indicator settings
+// coincells - 3.0-5.0
+// lithium ion - 1.0-3.2
+const float maxBatVolt = 3.2;//5.0;
+const float minBatVolt = 2;//1.8;
+// whether to print the voltage on startup or not
+const bool printVoltage = false;
+
 // initialize the neopixel strip           vvv these values are related to the type of strip used
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 
@@ -18,6 +26,18 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 // Burning >=100 (flashing Red)
 
 // (inclusive)-(exclusive)
+// 100-120
+uint32_t  lava[8] = {
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150),
+  strip.Color(250, 10, 5, 150)
+};
+
 // 80-100
 uint32_t  hot[8] = {
   strip.Color(250, 150, 5, 0),
@@ -68,14 +88,14 @@ uint32_t  cool[8] = {
 
 //  0-20
 uint32_t  freezing[8] = {
-  strip.Color(5, 245, 245, 0),
-  strip.Color(40, 245, 245, 0),
-  strip.Color(75, 245, 245, 0),
-  strip.Color(110, 245, 245, 0),
-  strip.Color(145, 245, 245, 0),
-  strip.Color(180, 245, 245, 0),
-  strip.Color(215, 245, 245, 0),
-  strip.Color(250, 245, 245, 0)
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150),
+  strip.Color(200, 245, 245, 150)
 };
 
 // frostbite <0 (flashing white)
@@ -95,6 +115,11 @@ void setup() {
   // display the life of the battery
   // analogReference(INTERNAL); at the end of the function
   displayBatteryLife();
+
+  // dummy readings
+  analogRead(SENSOR_PIN);
+  delay(10);
+  analogRead(SENSOR_PIN);
 
 }
 
@@ -117,7 +142,7 @@ void loop() {
   if (millis() > switchTime) {
     switchAnimation();
   }
- 
+  
   // display temperature
   displayTemperature(readTemp(), animation);
 
@@ -158,12 +183,10 @@ void displayBatteryLife(){
   // divide by number of data values & turn into volts instead of millivolts
   float vcc = (float) totalVcc / (8 * 1000);
   Serial.print("Vcc: "); Serial.println(vcc);
-  //printValue(vcc);
-  // 5 - full
-  // 2.7 - empty
-  float full = 5.0;
-  float empty = 2.7;
-  float percent = (vcc - empty) / (full - empty);
+  if (printVoltage) {
+    printValue(vcc);
+  }
+  float percent = (vcc - minBatVolt) / (maxBatVolt - minBatVolt);
   Serial.print(percent * 100); Serial.println("%");
   // display percent
   strip.clear();
@@ -204,6 +227,11 @@ void displayBatteryLife(){
   delay(10);
 }
 
+/**
+ * This is used to estimate the battery life
+ * The vcc voltage is read using the internal reverence
+ * This is usually around 1 volt lower than the battery
+ */
 long readVcc() {
  
 long result;
@@ -218,20 +246,26 @@ long result;
   return result;
 }
 
+// this function prints out a numerical value on the NeoPixels
+// used for debugging with the battery
 void printValue(float value) {
   //temporarily holds data from vals
   char charVal[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
 
-  //4 is mininum width, 3 is precision; float value is copied onto buff
+  //4 is mininum width, 3 is precision; float value is copied onto charVal
   dtostrf(value, 4, 3, charVal);
+  // print same value to the serial port (to test if they match)
   Serial.print("Printing value: "); Serial.println(charVal);
   strip.clear();
+  // print out the charVal array
   for (int i = 0; i < 8; i++) {
     if (charVal[i] == 'x') {
+      // no more numbers
       break;
     }
     if (charVal[i] == '0') {
-      strip.setPixelColor(i, 255, 255, 0, 0);
+        // one yellow blink for zero
+        strip.setPixelColor(i, 255, 255, 0, 0);
         strip.show();
         delay(1000);
         strip.setPixelColor(i, 0, 0, 0, 0);
@@ -239,7 +273,7 @@ void printValue(float value) {
         delay(1000);
     }
     if (charVal[i] == '.') {
-      // decimal
+      // decimal - 3 blue blinks
       for (int j = 0; j < 3; j++) {
         strip.setPixelColor(i, 0, 0, 255, 0);
         strip.show();
@@ -249,7 +283,7 @@ void printValue(float value) {
         delay(500);
       }
     } else {
-      // number
+      // number - blink green the number value
       int digit = charVal[i] - '0';
       for (int j = 0; j < digit; j++) {
         strip.setPixelColor(i, 0, 255, 0, 0);
@@ -295,9 +329,12 @@ int readTemp() {
 void displayTemperature(int temp, bool animation) {
   if (animation) {
     // animations for different temperatures
-    if (temp >= 100) {
+    if (temp >= 120) {
       // burning
       bounceFade(40, 100, 2 * delayMultiplier);
+    } else if (temp >= 100) {
+      // lava
+      SnowSparkleColor(lava[0], 20, 200, 8);
     } else if (temp >= 80) {
       // hot
       sparkleFade(20, 50, 70 * delayMultiplier);
@@ -324,9 +361,12 @@ void displayTemperature(int temp, bool animation) {
   } else {
     // display gauge
     // other than the end cases, tempurature is mapped from the value to an index of 0-7
-    if (temp >= 100) {
+    if (temp >= 120) {
       flashRed();
       delay(1000);
+    } else if (temp >= 100) {
+      int index = (temp - 100) / 2.5;
+      displayGauge(lava, index, 0);
     } else if (temp >= 80) {
       int index = (temp - 80) / 2.5;
       displayGauge(hot, index, 0);
@@ -672,12 +712,13 @@ void SnowSparkle(byte red, byte green, byte blue, int SparkleDelay, int SpeedDel
 */
 
 void SnowSparkleColor(uint32_t color, int SparkleDelay, int SpeedDelay, int leds) {
+  strip.clear();
   for (int j = 0; j < leds; j++) {
     strip.setPixelColor(j, color);
   }
 
   int Pixel = random(leds);
-  strip.setPixelColor(Pixel, 0xff, 0xff, 0xff, 0);
+  strip.setPixelColor(Pixel, 0xff, 0xff, 0xff, 0xff);
   strip.show();
   delay(SparkleDelay);
   strip.setPixelColor(Pixel, color);
